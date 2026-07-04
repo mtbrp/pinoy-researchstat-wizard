@@ -1,124 +1,184 @@
 import streamlit as st
+import pandas as pd
+from st_supabase_connection import SupabaseConnection
 
-# --- 1. CONFIGURATION & UI STYLING ---
-st.set_page_config(
-    page_title="Pinoy ReserchStat Wizard", 
-    page_icon="📊", 
-    layout="centered"
-)
+# --- 1. CONFIGURATION & INITIALIZATION ---
+st.set_page_config(page_title="Pinoy Healthcare Board Reviewer", page_icon="🇵🇭", layout="centered")
 
-st.title("📊 Pinoy ResearchStat Wizard")
-st.subheader("Your Methodology & Statistical Computation Guide")
-st.write(
-    "Stuck on Chapter 3? Select your research approach below, and we will "
-    "suggest the appropriate statistical computations for your study."
-)
-st.divider()
+# Initialize Supabase connection using Streamlit secrets
+supabase = st.connection("supabase", type=SupabaseConnection)
 
-# --- 2. STEP 1: RESEARCH METHOD ---
-st.write("### 🔍 Step 1: Select Your Research Method")
-method = st.selectbox(
-    "What is your overarching research method?",
-    ["Select a method...", "Quantitative (Numerical data)", "Qualitative (Textual/Conceptual data)", "Mixed-Method (Both)"]
-)
+# Define your public Google Sheets URL (Replace with your actual public link)
+# Make sure the sheet ends with /export?format=csv
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=0"
 
-# --- 3. STEP 2 & 3: CONDITIONAL LOGIC BASED ON USER INPUT ---
-if method == "Quantitative (Numerical data)":
-    st.write("### 📐 Step 2: Choose Your Research Design")
-    design = st.selectbox(
-        "Which quantitative research design matches your study?",
-        [
-            "Select a design...",
-            "Descriptive (Describing profiles, frequencies, averages)",
-            "Correlational (Testing relationships between two variables)",
-            "Quasi-Experimental / Experimental (Testing cause and effect between groups)"
-        ]
-    )
+# Initialize Session States for Quiz Flow
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+if "q_index" not in st.session_state:
+    st.session_state.q_index = 0
+if "score" not in st.session_state:
+    st.session_state.score = 0
+if "quiz_started" not in st.session_state:
+    st.session_state.quiz_started = False
+if "submitted" not in st.session_state:
+    st.session_state.submitted = False
+
+# --- 2. CACHED DATA FETCHING ---
+@st.cache_data(ttl=3600)  # Caches questions for 1 hour to keep it free and instant
+def fetch_quiz_data(url):
+    try:
+        df = pd.read_csv(url)
+        # Ensure all required column names are lowercase stripped for safety
+        df.columns = df.columns.str.strip().str.lower()
+        return df
+    except Exception as e:
+        st.error(f"Error loading board exam questions: {e}")
+        return pd.DataFrame()
+
+# --- 3. AUTHENTICATION LOGIC (SUPABASE OAUTH) ---
+def handle_login():
+    # Triggers Supabase OAuth for Google
+    try:
+        # Note: In a live environment, Supabase handles the redirection.
+        # This function generates the authorization URL for Google Sign-In.
+        auth_data = supabase.client.auth.sign_in_with_oauth({
+            "provider": "google",
+            "options": {
+                "redirect_to": "https://your-app-name.streamlit.app"  # Your Streamlit production URL
+            }
+        })
+        if auth_data:
+            st.info("Redirecting to Google Secure Login...")
+            # Streamlit handles the handoff via the generated OAuth URL
+    except Exception as e:
+        st.error(f"Login failed: {e}")
+
+# Check if user returned from Google OAuth with an active session token
+# (st_supabase_connection automatically catches active session cookies/tokens if configured)
+try:
+    session = supabase.client.auth.get_session()
+    if session and session.user:
+        st.session_state.logged_in = True
+        st.session_state.user_info = session.user
+except Exception:
+    pass  # No active session found yet
+
+# --- 4. UI ROUTING (GATEKEEPER) ---
+if not st.session_state.logged_in:
+    # Welcome Screen / Gated Login Screen
+    st.title("🇵🇭 Pinoy Healthcare Board Reviewer")
+    st.subheader("PT • OT • Nursing • MedTech • Pharmacy")
+    st.write("Welcome, future topnotcher! Practice board-exam style questions per subject. Sign in with your school or personal Gmail account to track your progress for free.")
     
-    if design != "Select a design...":
-        st.divider()
-        st.write("### 🧮 Step 3: Suggested Statistical Computations")
-        
-        if "Descriptive" in design:
-            st.info("💡 **Your Study Focus:** Describing characteristics of a population or phenomenon.")
-            
-            # Using Markdown tables for clear, scannable data
-            st.markdown("""
-            | Statistical Tool | When to Use | Example in Pinoy Healthcare |
-            | :--- | :--- | :--- |
-            | **Frequency & Percentage** | To show demographic distributions. | Counting how many Nursing students prefer online vs. traditional review. |
-            | **Mean & Standard Deviation** | To determine the average score or level of agreement. | Finding the average satisfaction level (1-5 Likert Scale) of MedTech interns. |
-            """)
-            
-        elif "Correlational" in design:
-            st.info("💡 **Your Study Focus:** Determining if a relationship exists between variables without establishing cause.")
-            
-            st.markdown("""
-            | Statistical Tool | Data Type Type | Example in Pinoy Healthcare |
-            | :--- | :--- | :--- |
-            | **Pearson $r$ Correlation** | Both variables are continuous/interval. | Correlating Pharmacy student study hours with their local mock board scores. |
-            | **Spearman Rho ($\rho$)** | Ranked or ordinal data (e.g., Likert items). | Relating socioeconomic status (Low, Mid, High) with stress levels. |
-            """)
-            st.caption("Note: Use standard $p$-value testing ($p < 0.05$) to check if the correlation is statistically significant.")
-            
-        elif "Experimental" in design:
-            st.info("💡 **Your Study Focus:** Comparing groups to evaluate the effect of an intervention.")
-            
-            st.markdown("""
-            | Statistical Tool | Setup | Example in Pinoy Healthcare |
-            | :--- | :--- | :--- |
-            | **Independent $t$-test** | Comparing **2 separate groups**. | Comparing PT board scores of students who used an app vs. those who used books. |
-            | **Paired $t$-test** | Comparing **1 group** before and after. | Testing Nursing students' anxiety levels *before* and *after* a wellness seminar. |
-            | **ANOVA (One-Way)** | Comparing **3 or more groups**. | Comparing passing rates among physical therapy grads from 3 different regions. |
-            """)
+    if st.button("🔴 Sign in with Google Mail", use_container_width=True):
+        handle_login()
+        # For local testing simulation, toggle this if you haven't setup Google Cloud Console yet:
+        # st.session_state.logged_in = True
+        # st.session_state.user_info = {"id": "test-user-123", "email": "student@edu.ph"}
+        # st.rerun()
 
-elif method == "Qualitative (Textual/Conceptual data)":
-    st.write("### 📐 Step 2: Choose Your Research Design")
-    design = st.selectbox(
-        "Which qualitative research design matches your study?",
-        [
-            "Select a design...",
-            "Phenomenological (Exploring lived experiences)",
-            "Thematic Analysis (Identifying patterns across interviews)",
-            "Case Study (In-depth exploration of a bounded system)"
-        ]
-    )
+else:
+    # --- 5. MAIN APPLICATION (LOGGED IN) ---
+    user_email = st.session_state.user_info.get("email", "Student")
     
-    if design != "Select a design...":
-        st.divider()
-        st.write("### 📝 Step 3: Suggested Data Analysis Methods")
-        st.warning("⚠️ **Reminder:** Qualitative studies deal with non-numerical text, meanings, and insights. Traditional statistical calculations (like t-tests) do not apply here!")
-        
-        st.markdown("""
-        * **Suggested Approach:** **Colaizzi’s Method** or **Braun & Clarke's Thematic Analysis**.
-        * **Tools to use:** Qualitative analysis software like **NVivo**, **ATLAS.ti**, or systematic manual coding in Excel.
-        * **Output Metric:** Rather than tables of numbers, your results will yield **Themes, Sub-themes, and Direct Patient/Student Quotations**.
-        """)
+    # Top Navbar / Header
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.write(f"👋 MedReviewer Account: **{user_email}**")
+    with col2:
+        if st.button("Log out"):
+            supabase.client.auth.sign_out()
+            st.session_state.logged_in = False
+            st.session_state.user_info = None
+            st.rerun()
+            
+    st.divider()
 
-elif method == "Mixed-Method (Both)":
-    st.write("### 📐 Step 2: Choose Your Research Design")
-    design = st.selectbox(
-        "Which mixed-method framework are you deploying?",
-        [
-            "Select a design...",
-            "Explanatory Sequential (Quant first ➡️ Qual follows to explain results)",
-            "Exploratory Sequential (Qual first ➡️ Quant follows to test findings)"
-        ]
-    )
-    
-    if design != "Select a design...":
-        st.divider()
-        st.write("### 🧮 Dynamic Suggested Computations")
-        st.success("✨ **Hybrid Route:** You will run both mathematical statistics and thematic coding.")
-        
-        if "Explanatory" in design:
-            st.write("1. **First Phase (Quant):** Run descriptive statistics or correlation metrics on your survey questionnaires.")
-            st.write("2. **Second Phase (Qual):** Conduct follow-up interviews with outlier participants to clarify *why* those numbers occurred.")
+    # --- 6. QUIZ MANAGEMENT & INTERACTION ---
+    questions_df = fetch_quiz_data(GOOGLE_SHEET_URL)
+
+    if questions_df.empty:
+        st.warning("⚠️ No quiz questions found. Please check your Google Sheet structure.")
+    else:
+        if not st.session_state.quiz_started:
+            st.title("📋 Select Your Review Module")
+            subject = st.selectbox("Choose Subject Module:", ["Nursing Mock Exam (NP1)", "MedTech Hematology", "PT/OT Anatomy"])
+            
+            if st.button("Start Practice Exam", type="primary"):
+                st.session_state.quiz_started = True
+                st.session_state.current_subject = subject
+                st.session_state.q_index = 0
+                st.session_state.score = 0
+                st.session_state.submitted = False
+                st.rerun()
         else:
-            st.write("1. **First Phase (Qual):** Interview students to discover variables or build a unique local metric tool.")
-            st.write("2. **Second Phase (Quant):** Distribute that newly created tool to a wide audience and run Factor Analysis or Cronbach's Alpha for reliability testing.")
-
-# --- 4. FOOTER ---
-if method != "Select a method...":
-    st.caption("---")
-    st.caption("Disclaimer: Ensure your specific choice aligns with your thesis adviser's recommendation or your institutional panel guidelines.")
+            # Active Quiz State
+            idx = st.session_state.q_index
+            subject = st.session_state.current_subject
+            
+            if idx < len(questions_df):
+                row = questions_df.iloc[idx]
+                
+                st.caption(f"📚 Module: {subject}")
+                st.progress((idx) / len(questions_df))
+                st.write(f"### Question {idx + 1} of {len(questions_df)}")
+                st.write(f"**{row['question']}**")
+                
+                # Setup Radio Choices dynamically
+                options = [row['a'], row['b'], row['c'], row['d']]
+                choice = st.radio("Select the correct answer:", options, key=f"choice_q_{idx}")
+                
+                if not st.session_state.submitted:
+                    if st.button("Submit Answer", type="primary"):
+                        st.session_state.submitted = True
+                        st.rerun()
+                else:
+                    # Rationale & Answer Validation View
+                    # Map full choice string back to the corresponding letter column ('a','b','c','d')
+                    selected_letter = ['a', 'b', 'c', 'd'][options.index(choice)]
+                    correct_letter = str(row['answer']).strip().lower()
+                    
+                    if selected_letter == correct_letter:
+                        st.success("✨ Correct Answer!")
+                        if not st.session_state.get(f"scored_q_{idx}", False):
+                            st.session_state.score += 1
+                            st.session_state[f"scored_q_{idx}"] = True
+                    else:
+                        st.error(f"❌ Incorrect. The correct answer is **{correct_letter.upper()}**.")
+                        
+                    st.info(f"💡 **Rationale:** {row['rationale']}")
+                    
+                    if st.button("Next Question ➡️"):
+                        st.session_state.q_index += 1
+                        st.session_state.submitted = False
+                        st.rerun()
+            else:
+                # --- 7. QUIZ END & SCORE LOGGING TO DATABASE ---
+                st.balloons()
+                st.title("🎉 Mock Exam Completed!")
+                final_score = st.session_state.score
+                total_q = len(questions_df)
+                percentage = round((final_score / total_q) * 100, 2)
+                
+                st.metric(label="Your Final Score", value=f"{final_score} / {total_q}", delta=f"{percentage}%")
+                
+                # Push metrics to Supabase profiles/quiz_scores table securely
+                try:
+                    user_id = st.session_state.user_info.get("id")
+                    # Send single score record object via raw RPC or table insert
+                    response = supabase.table("quiz_scores").insert({
+                        "user_id": user_id,
+                        "subject": subject,
+                        "score": final_score,
+                        "total_questions": total_q
+                    }).execute()
+                    st.toast("🎯 Progress saved automatically to your dashboard profile!", icon="💾")
+                except Exception as e:
+                    st.warning("⚠️ Score processed, but could not sync progress database.")
+                
+                if st.button("Return to Dashboard"):
+                    st.session_state.quiz_started = False
+                    st.rerun()
