@@ -1,184 +1,123 @@
 import streamlit as st
 import pandas as pd
-from st_supabase_connection import SupabaseConnection
+import numpy as np
 
-# --- 1. CONFIGURATION & INITIALIZATION ---
-st.set_page_config(page_title="Pinoy Healthcare Board Reviewer", page_icon="🇵🇭", layout="centered")
+# --- 1. APP CONFIGURATION ---
+st.set_page_config(page_title="Pinoy Healthcare ResearchStat", page_icon="📊", layout="centered")
 
-# Initialize Supabase connection using Streamlit secrets
-supabase = st.connection("supabase", type=SupabaseConnection)
+st.title("📊 Pinoy Healthcare ResearchStat Wizard")
+st.subheader("Methodology, Search, & Statistical Visualization Dashboard")
+st.write("Tailored for BS Nursing, BS PT, BS OT, Pharmacy, and Medical Technology undergrads.")
+st.divider()
 
-# Define your public Google Sheets URL (Replace with your actual public link)
-# Make sure the sheet ends with /export?format=csv
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=0"
+# --- 2. FRONT-PAGE BRIEF INFO SEARCH BAR ---
+st.write("### 🔍 Quick Course & Method Search")
+search_query = st.text_input(
+    "Search for a research method or healthcare course (e.g., 'Nursing', 'Quantitative', 'MedTech'):",
+    placeholder="Type here..."
+).strip().lower()
 
-# Initialize Session States for Quiz Flow
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
-if "q_index" not in st.session_state:
-    st.session_state.q_index = 0
-if "score" not in st.session_state:
-    st.session_state.score = 0
-if "quiz_started" not in st.session_state:
-    st.session_state.quiz_started = False
-if "submitted" not in st.session_state:
-    st.session_state.submitted = False
+# Dictionary containing brief contextual information
+search_database = {
+    "quantitative": """
+        **Quantitative Method in Healthcare:** Focuses on objective measurements and statistical, mathematical, or numerical analysis of data. 
+        * *Healthcare Context:* Tracking blood pressure drops across a sample, evaluating board exam passing rates, or measuring treatment efficacy scores.
+    """,
+    "qualitative": """
+        **Qualitative Method in Healthcare:** Focuses on understanding human experiences, beliefs, and behaviors through textual or narrative data.
+        * *Healthcare Context:* Exploring the lived experiences of rural nurses, understanding patient vaccine hesitancy, or phenomenological studies on burn-out among physical therapists.
+    """,
+    "mix-method": "See 'mixed-method'.",
+    "mixed-method": """
+        **Mixed-Method in Healthcare:** Combines both quantitative and qualitative data within a single study to provide a comprehensive look at a problem.
+        * *Healthcare Context:* Surveying 100 medical technology interns on stress levels (Quantitative) and then conducting deep interviews with the 5 most stressed interns to understand why (Qualitative).
+    """,
+    "bs nursing": """
+        **BS Nursing Context:** Focuses heavily on patient care models, clinical interventions, nurse-to-patient ratios, and health promotion. 
+        * *Common Stat:* Descriptive means for patient satisfaction, paired $t$-tests for pre/post-training nursing knowledge.
+    """,
+    "bs pt": "See 'physical therapy'.",
+    "bs ot": "See 'occupational therapy'.",
+    "physical therapy": """
+        **BS Physical Therapy / Occupational Therapy Context:** Centers around rehabilitation metrics, range of motion (ROM), recovery timelines, and functional independence measures.
+        * *Common Stat:* Repeated measures ANOVA to trace patient mobility scores at week 1, week 4, and week 8 post-stroke.
+    """,
+    "occupational therapy": """
+        **BS Occupational Therapy / Physical Therapy Context:** Centers around rehabilitation metrics, recovery timelines, ergonomic adaptations, and functional independence measures.
+        * *Common Stat:* Correlation metrics relating cognitive function scores with daily living independence levels in pediatric patients.
+    """,
+    "pharmacy": """
+        **Pharmacy Context:** Often involves drug adherence rates, compounding accuracy, medication errors, and pharmacological knowledge assessments.
+        * *Common Stat:* Chi-Square tests to see if drug compliance rates differ significantly across age brackets or regions.
+    """,
+    "medical technology": "See 'medtech'.",
+    "medtech": """
+        **Medical Technology / Medical Laboratory Science Context:** Revolves around lab test sensitivity, specificity, diagnostic accuracy, machine calibration differences, and sample contamination rates.
+        * *Common Stat:* Cohen's Kappa for inter-rater reliability between two different lab analysts reading blood smears.
+    """
+}
 
-# --- 2. CACHED DATA FETCHING ---
-@st.cache_data(ttl=3600)  # Caches questions for 1 hour to keep it free and instant
-def fetch_quiz_data(url):
-    try:
-        df = pd.read_csv(url)
-        # Ensure all required column names are lowercase stripped for safety
-        df.columns = df.columns.str.strip().str.lower()
-        return df
-    except Exception as e:
-        st.error(f"Error loading board exam questions: {e}")
-        return pd.DataFrame()
+# Process search query
+if search_query:
+    found = False
+    for key, value in search_database.items():
+        if key in search_query:
+            if "See '" in value:  # Handle simple aliases
+                alias_key = value.split("'")[1]
+                value = search_database[alias_key]
+            st.info(value)
+            found = True
+            break
+    if not found:
+        st.warning("No specific match found. Try searching keywords like: 'Nursing', 'PT', 'Medtech', 'Quantitative', or 'Qualitative'.")
+st.divider()
 
-# --- 3. AUTHENTICATION LOGIC (SUPABASE OAUTH) ---
-def handle_login():
-    # Triggers Supabase OAuth for Google
-    try:
-        # Note: In a live environment, Supabase handles the redirection.
-        # This function generates the authorization URL for Google Sign-In.
-        auth_data = supabase.client.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                "redirect_to": "https://your-app-name.streamlit.app"  # Your Streamlit production URL
-            }
-        })
-        if auth_data:
-            st.info("Redirecting to Google Secure Login...")
-            # Streamlit handles the handoff via the generated OAuth URL
-    except Exception as e:
-        st.error(f"Login failed: {e}")
+# --- 3. DYNAMIC METHODOLOGY SELECTOR ---
+st.write("### 📐 Step-by-Step Methodology Guide")
+method = st.selectbox(
+    "Select Research Method:",
+    ["Select a method...", "Quantitative", "Qualitative", "Mixed-Method"]
+)
 
-# Check if user returned from Google OAuth with an active session token
-# (st_supabase_connection automatically catches active session cookies/tokens if configured)
-try:
-    session = supabase.client.auth.get_session()
-    if session and session.user:
-        st.session_state.logged_in = True
-        st.session_state.user_info = session.user
-except Exception:
-    pass  # No active session found yet
-
-# --- 4. UI ROUTING (GATEKEEPER) ---
-if not st.session_state.logged_in:
-    # Welcome Screen / Gated Login Screen
-    st.title("🇵🇭 Pinoy Healthcare Board Reviewer")
-    st.subheader("PT • OT • Nursing • MedTech • Pharmacy")
-    st.write("Welcome, future topnotcher! Practice board-exam style questions per subject. Sign in with your school or personal Gmail account to track your progress for free.")
+if method == "Quantitative":
+    design = st.selectbox(
+        "Select Quantitative Design:",
+        ["Descriptive (Profiles, Averages)", "Correlational (Relationships)", "Experimental (Cause & Effect)"]
+    )
+    if design:
+        st.success(f"Recommended Stat for {design}: Use Mean/SD, Pearson $r$, or $t$-tests based on your specific variables.")
+        
+elif method == "Qualitative":
+    st.info("💡 Qualitative research uses textual analysis (e.g., Thematic Analysis via Braun & Clarke). Statistics do not apply.")
     
-    if st.button("🔴 Sign in with Google Mail", use_container_width=True):
-        handle_login()
-        # For local testing simulation, toggle this if you haven't setup Google Cloud Console yet:
-        # st.session_state.logged_in = True
-        # st.session_state.user_info = {"id": "test-user-123", "email": "student@edu.ph"}
-        # st.rerun()
+elif method == "Mixed-Method":
+    st.info("💡 Hybrid approach: Deploy quantitative tracking surveys first, followed by qualitative focus groups.")
 
-else:
-    # --- 5. MAIN APPLICATION (LOGGED IN) ---
-    user_email = st.session_state.user_info.get("email", "Student")
-    
-    # Top Navbar / Header
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.write(f"👋 MedReviewer Account: **{user_email}**")
-    with col2:
-        if st.button("Log out"):
-            supabase.client.auth.sign_out()
-            st.session_state.logged_in = False
-            st.session_state.user_info = None
-            st.rerun()
-            
-    st.divider()
+st.divider()
 
-    # --- 6. QUIZ MANAGEMENT & INTERACTION ---
-    questions_df = fetch_quiz_data(GOOGLE_SHEET_URL)
+# --- 4. INTERACTIVE STATISTICAL VISUALIZATION (SLIDERS) ---
+st.write("### 📉 Interactive Statistical Visualizer")
+st.write(
+    "Adjust the slider below to see how your **Sample Size ($n$)** directly affects your "
+    "**Margin of Error** in healthcare surveys."
+)
 
-    if questions_df.empty:
-        st.warning("⚠️ No quiz questions found. Please check your Google Sheet structure.")
-    else:
-        if not st.session_state.quiz_started:
-            st.title("📋 Select Your Review Module")
-            subject = st.selectbox("Choose Subject Module:", ["Nursing Mock Exam (NP1)", "MedTech Hematology", "PT/OT Anatomy"])
-            
-            if st.button("Start Practice Exam", type="primary"):
-                st.session_state.quiz_started = True
-                st.session_state.current_subject = subject
-                st.session_state.q_index = 0
-                st.session_state.score = 0
-                st.session_state.submitted = False
-                st.rerun()
-        else:
-            # Active Quiz State
-            idx = st.session_state.q_index
-            subject = st.session_state.current_subject
-            
-            if idx < len(questions_df):
-                row = questions_df.iloc[idx]
-                
-                st.caption(f"📚 Module: {subject}")
-                st.progress((idx) / len(questions_df))
-                st.write(f"### Question {idx + 1} of {len(questions_df)}")
-                st.write(f"**{row['question']}**")
-                
-                # Setup Radio Choices dynamically
-                options = [row['a'], row['b'], row['c'], row['d']]
-                choice = st.radio("Select the correct answer:", options, key=f"choice_q_{idx}")
-                
-                if not st.session_state.submitted:
-                    if st.button("Submit Answer", type="primary"):
-                        st.session_state.submitted = True
-                        st.rerun()
-                else:
-                    # Rationale & Answer Validation View
-                    # Map full choice string back to the corresponding letter column ('a','b','c','d')
-                    selected_letter = ['a', 'b', 'c', 'd'][options.index(choice)]
-                    correct_letter = str(row['answer']).strip().lower()
-                    
-                    if selected_letter == correct_letter:
-                        st.success("✨ Correct Answer!")
-                        if not st.session_state.get(f"scored_q_{idx}", False):
-                            st.session_state.score += 1
-                            st.session_state[f"scored_q_{idx}"] = True
-                    else:
-                        st.error(f"❌ Incorrect. The correct answer is **{correct_letter.upper()}**.")
-                        
-                    st.info(f"💡 **Rationale:** {row['rationale']}")
-                    
-                    if st.button("Next Question ➡️"):
-                        st.session_state.q_index += 1
-                        st.session_state.submitted = False
-                        st.rerun()
-            else:
-                # --- 7. QUIZ END & SCORE LOGGING TO DATABASE ---
-                st.balloons()
-                st.title("🎉 Mock Exam Completed!")
-                final_score = st.session_state.score
-                total_q = len(questions_df)
-                percentage = round((final_score / total_q) * 100, 2)
-                
-                st.metric(label="Your Final Score", value=f"{final_score} / {total_q}", delta=f"{percentage}%")
-                
-                # Push metrics to Supabase profiles/quiz_scores table securely
-                try:
-                    user_id = st.session_state.user_info.get("id")
-                    # Send single score record object via raw RPC or table insert
-                    response = supabase.table("quiz_scores").insert({
-                        "user_id": user_id,
-                        "subject": subject,
-                        "score": final_score,
-                        "total_questions": total_q
-                    }).execute()
-                    st.toast("🎯 Progress saved automatically to your dashboard profile!", icon="💾")
-                except Exception as e:
-                    st.warning("⚠️ Score processed, but could not sync progress database.")
-                
-                if st.button("Return to Dashboard"):
-                    st.session_state.quiz_started = False
-                    st.rerun()
+# Slider input for sample size
+sample_size = st.slider("Select Sample Size ($n$ of Respondents):", min_value=10, max_value=500, value=100, step=10)
+
+# Theoretical math formula simulation
+simulated_error = (1 / np.sqrt(sample_size)) * 100
+
+col1, col2 = st.columns(2)
+with col1:
+    st.metric(label="Selected Sample Size", value=f"{sample_size} students")
+with col2:
+    st.metric(label="Estimated Margin of Error", value=f"± {simulated_error:.2f}%", delta=f"Lower error is better", delta_color="inverse")
+
+# Generate mock data curve visualizer
+st.write("**Visualizing Precision:** As your sample size moves right, the error margin goes down.")
+chart_data = pd.DataFrame({
+    'Sample Size': np.arange(10, 510, 10),
+    'Margin of Error (%)': (1 / np.sqrt(np.arange(10, 510, 10))) * 100
+})
+st.line_chart(data=chart_data, x='Sample Size', y='Margin of Error (%)')
